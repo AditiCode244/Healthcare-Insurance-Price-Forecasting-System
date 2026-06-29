@@ -1,179 +1,118 @@
-```python
-import streamlit as st
-from prediction_helper import predict
+import pandas as pd
+import joblib
 
-st.set_page_config(
-    page_title="Healthcare Insurance Price Forecasting System",
-    layout="wide"
-)
+model_young = joblib.load("./artifacts/model_young.joblib")
+model_rest = joblib.load("./artifacts/model_rest.joblib")
+scaler_young = joblib.load("./artifacts/scaler_young.joblib")
+scaler_rest = joblib.load("./artifacts/scaler_rest.joblib")
 
-st.markdown("""
-<h1 style='text-align:center; color:#1f4e79;'>
-Healthcare Insurance Price Forecasting System
-</h1>
-<p style='text-align:center;'>
-Predict insurance premium using customer demographic and health information
-</p>
-<hr>
-""", unsafe_allow_html=True)
+def calculate_normalized_risk(medical_history):
+    risk_scores = {
+        "diabetes": 6,
+        "heart disease": 8,
+        "high blood pressure": 6,
+        "thyroid": 5,
+        "no disease": 0,
+        "none": 0
+    }
+    # Split the medical history into potential two parts and convert to lowercase
+    diseases = medical_history.lower().split(" & ")
 
-st.sidebar.header("Project Information")
+    # Calculate the total risk score by summing the risk scores for each part
+    total_risk_score = sum(risk_scores.get(disease, 0) for disease in diseases)  # Default to 0 if disease not found
 
-st.sidebar.write("""
-This machine learning application predicts the estimated
-health insurance premium based on customer details,
-medical history and lifestyle factors.
-""")
+    max_score = 14 # risk score for heart disease (8) + second max risk score (6) for diabetes or high blood pressure
+    min_score = 0  # Since the minimum score is always 0
 
-categorical_options = {
-    'Gender': ['Male', 'Female'],
-    'Marital Status': ['Unmarried', 'Married'],
-    'BMI Category': ['Normal', 'Obesity', 'Overweight', 'Underweight'],
-    'Smoking Status': ['No Smoking', 'Regular', 'Occasional'],
-    'Employment Status': ['Salaried', 'Self-Employed', 'Freelancer'],
-    'Region': ['Northwest', 'Southeast', 'Northeast', 'Southwest'],
-    'Medical History': [
-        'No Disease',
-        'Diabetes',
-        'High blood pressure',
-        'Diabetes & High blood pressure',
-        'Thyroid',
-        'Heart disease',
-        'High blood pressure & Heart disease',
-        'Diabetes & Thyroid',
-        'Diabetes & Heart disease'
-    ],
-    'Insurance Plan': ['Bronze', 'Silver', 'Gold']
-}
+    # Normalize the total risk score
+    normalized_risk_score = (total_risk_score - min_score) / (max_score - min_score)
 
-st.subheader("Enter Customer Details")
+    return normalized_risk_score
 
-row1 = st.columns(3)
-row2 = st.columns(3)
-row3 = st.columns(3)
-row4 = st.columns(3)
+def preprocess_input(input_dict):
+    # Define the expected columns and initialize the DataFrame with zeros
+    expected_columns = [
+        'age', 'number_of_dependants', 'income_lakhs', 'insurance_plan', 'genetical_risk', 'normalized_risk_score',
+        'gender_Male', 'region_Northwest', 'region_Southeast', 'region_Southwest', 'marital_status_Unmarried',
+        'bmi_category_Obesity', 'bmi_category_Overweight', 'bmi_category_Underweight', 'smoking_status_Occasional',
+        'smoking_status_Regular', 'employment_status_Salaried', 'employment_status_Self-Employed'
+    ]
 
-with row1[0]:
-    age = st.number_input(
-        "Age",
-        min_value=18,
-        max_value=100,
-        step=1
-    )
+    insurance_plan_encoding = {'Bronze': 1, 'Silver': 2, 'Gold': 3}
 
-with row1[1]:
-    number_of_dependants = st.number_input(
-        "Number of Dependents",
-        min_value=0,
-        max_value=20,
-        step=1
-    )
+    df = pd.DataFrame(0, columns=expected_columns, index=[0])
+    # df.fillna(0, inplace=True)
 
-with row1[2]:
-    income_lakhs = st.number_input(
-        "Annual Income (Lakhs)",
-        min_value=0,
-        max_value=200,
-        step=1
-    )
+    # Manually assign values for each categorical input based on input_dict
+    for key, value in input_dict.items():
+        if key == 'Gender' and value == 'Male':
+            df['gender_Male'] = 1
+        elif key == 'Region':
+            if value == 'Northwest':
+                df['region_Northwest'] = 1
+            elif value == 'Southeast':
+                df['region_Southeast'] = 1
+            elif value == 'Southwest':
+                df['region_Southwest'] = 1
+        elif key == 'Marital Status' and value == 'Unmarried':
+            df['marital_status_Unmarried'] = 1
+        elif key == 'BMI Category':
+            if value == 'Obesity':
+                df['bmi_category_Obesity'] = 1
+            elif value == 'Overweight':
+                df['bmi_category_Overweight'] = 1
+            elif value == 'Underweight':
+                df['bmi_category_Underweight'] = 1
+        elif key == 'Smoking Status':
+            if value == 'Occasional':
+                df['smoking_status_Occasional'] = 1
+            elif value == 'Regular':
+                df['smoking_status_Regular'] = 1
+        elif key == 'Employment Status':
+            if value == 'Salaried':
+                df['employment_status_Salaried'] = 1
+            elif value == 'Self-Employed':
+                df['employment_status_Self-Employed'] = 1
+        elif key == 'Insurance Plan':  # Correct key usage with case sensitivity
+            df['insurance_plan'] = insurance_plan_encoding.get(value, 1)
+        elif key == 'Age':  # Correct key usage with case sensitivity
+            df['age'] = value
+        elif key == 'Number of Dependants':  # Correct key usage with case sensitivity
+            df['number_of_dependants'] = value
+        elif key == 'Income in Lakhs':  # Correct key usage with case sensitivity
+            df['income_lakhs'] = value
+        elif key == "Genetical Risk":
+            df['genetical_risk'] = value
 
-with row2[0]:
-    genetical_risk = st.number_input(
-        "Genetic Risk Score",
-        min_value=0,
-        max_value=5,
-        step=1
-    )
+    # Assuming the 'normalized_risk_score' needs to be calculated based on the 'age'
+    df['normalized_risk_score'] = calculate_normalized_risk(input_dict['Medical History'])
+    df = handle_scaling(input_dict['Age'], df)
 
-with row2[1]:
-    insurance_plan = st.selectbox(
-        "Insurance Plan",
-        categorical_options['Insurance Plan']
-    )
+    return df
 
-with row2[2]:
-    employment_status = st.selectbox(
-        "Employment Status",
-        categorical_options['Employment Status']
-    )
+def handle_scaling(age, df):
+    # scale age and income_lakhs column
+    if age <= 25:
+        scaler_object = scaler_young
+    else:
+        scaler_object = scaler_rest
 
-with row3[0]:
-    gender = st.selectbox(
-        "Gender",
-        categorical_options['Gender']
-    )
+    cols_to_scale = scaler_object['cols_to_scale']
+    scaler = scaler_object['scaler']
 
-with row3[1]:
-    marital_status = st.selectbox(
-        "Marital Status",
-        categorical_options['Marital Status']
-    )
+    df['income_level'] = None # since scaler object expects income_level supply it. This will have no impact on anything
+    df[cols_to_scale] = scaler.transform(df[cols_to_scale])
 
-with row3[2]:
-    bmi_category = st.selectbox(
-        "BMI Category",
-        categorical_options['BMI Category']
-    )
+    df.drop('income_level', axis='columns', inplace=True)
 
-with row4[0]:
-    smoking_status = st.selectbox(
-        "Smoking Status",
-        categorical_options['Smoking Status']
-    )
+    return df
 
-with row4[1]:
-    region = st.selectbox(
-        "Region",
-        categorical_options['Region']
-    )
+def predict(input_dict):
+    input_df = preprocess_input(input_dict)
 
-with row4[2]:
-    medical_history = st.selectbox(
-        "Medical History",
-        categorical_options['Medical History']
-    )
+    if input_dict['Age'] <= 25:
+        prediction = model_young.predict(input_df)
+    else:
+        prediction = model_rest.predict(input_df)
 
-input_dict = {
-    'Age': age,
-    'Number of Dependants': number_of_dependants,
-    'Income in Lakhs': income_lakhs,
-    'Genetical Risk': genetical_risk,
-    'Insurance Plan': insurance_plan,
-    'Employment Status': employment_status,
-    'Gender': gender,
-    'Marital Status': marital_status,
-    'BMI Category': bmi_category,
-    'Smoking Status': smoking_status,
-    'Region': region,
-    'Medical History': medical_history
-}
-
-st.markdown("")
-
-if st.button("Calculate Premium"):
-
-    prediction = predict(input_dict)
-
-    st.markdown("---")
-
-    st.markdown(
-        f"""
-        <div style="
-        background-color:#f4f6f7;
-        padding:25px;
-        border-radius:10px;
-        text-align:center;
-        ">
-        <h3>Estimated Insurance Premium</h3>
-        <h2>₹ {prediction:,}</h2>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-st.markdown("---")
-
-st.caption(
-    "This prediction is generated using a machine learning model and should be used for academic purposes only."
-)
-```
+    return int(prediction[0])
